@@ -12,55 +12,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  trigger:
+  cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 2
     env:
-      TARGET_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox
-      HEALTH_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/homologation/health
-      FIXTURE_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/create-outbox-fixture
+      CLEANUP_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/cleanup-outbox-fixtures
       STATUS_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/outbox-fixture-status
       SCHEDULER_SECRET: ${{ secrets.RD_GOOGLE_SCHEDULER_SECRET }}
     steps:
-      - name: Validate homologation target and secret
+      - name: Validate homologation cleanup target
         shell: bash
         run: |
-          test "$TARGET_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox"
-          test "$HEALTH_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/homologation/health"
-          test "$FIXTURE_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/create-outbox-fixture"
+          test "$CLEANUP_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/cleanup-outbox-fixtures"
           test "$STATUS_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/outbox-fixture-status"
           test -n "$SCHEDULER_SECRET"
 
-      - name: Validate isolated Google schema
+      - name: Logically disable synthetic fixtures
         shell: bash
         run: |
-          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 55 "$HEALTH_URL")"
-          echo "Health HTTP status: $status"
-          test "$status" = "200"
+          body="$(curl --fail-with-body --silent --show-error --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$CLEANUP_URL")"
+          echo "$body"
+          test "$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cleanup"]["logicalCleanup"])')" = "True"
 
-      - name: Seed restricted synthetic fixtures
-        shell: bash
-        run: |
-          missing="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --max-time 55 "$FIXTURE_URL")"
-          wrong="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header "Authorization: Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" --max-time 55 "$FIXTURE_URL")"
-          correct="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$FIXTURE_URL")"
-          echo "Fixture missing Bearer HTTP status: $missing"
-          echo "Fixture wrong Bearer HTTP status: $wrong"
-          echo "Fixture correct Bearer HTTP status: $correct"
-          test "$missing" = "401"
-          test "$wrong" = "401"
-          test "$correct" = "201"
-
-      - name: Trigger synthetic outbox
-        shell: bash
-        run: |
-          correct="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$TARGET_URL")"
-          echo "Process outbox HTTP status: $correct"
-          test "$correct" = "200"
-
-      - name: Record sanitized synthetic status
+      - name: Confirm synthetic runtime data disabled
         shell: bash
         run: |
           body="$(curl --fail-with-body --silent --show-error --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$STATUS_URL")"
           echo "$body"
-          test "$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin)["fixtures"]["syntheticOnly"])')" = "True"
+          printf '%s' "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin)["fixtures"]; assert d["syntheticOnly"] is True; assert all(x["status"] == "DISABLED" for x in d["outbox"]); assert all(x["sync_status"] == "DISABLED" for x in d["links"])'
