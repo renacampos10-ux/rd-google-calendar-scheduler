@@ -1,6 +1,8 @@
 name: RD Google Outbox - Homologacao
 
 on:
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -12,10 +14,12 @@ concurrency:
 jobs:
   trigger:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     env:
       TARGET_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox
       HEALTH_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/homologation/health
+      FIXTURE_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/create-outbox-fixture
+      STATUS_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/outbox-fixture-status
       SCHEDULER_SECRET: ${{ secrets.RD_GOOGLE_SCHEDULER_SECRET }}
     steps:
       - name: Validate homologation target and secret
@@ -23,45 +27,40 @@ jobs:
         run: |
           test "$TARGET_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox"
           test "$HEALTH_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/homologation/health"
+          test "$FIXTURE_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/create-outbox-fixture"
+          test "$STATUS_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/outbox-fixture-status"
           test -n "$SCHEDULER_SECRET"
 
       - name: Validate isolated Google schema
         shell: bash
         run: |
-          status="$(curl --silent --show-error \
-            --output /dev/null \
-            --write-out '%{http_code}' \
-            --max-time 55 \
-            "$HEALTH_URL")"
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 55 "$HEALTH_URL")"
           echo "Health HTTP status: $status"
           test "$status" = "200"
 
-      - name: Validate Bearer protection and trigger outbox
+      - name: Seed restricted synthetic fixtures
         shell: bash
         run: |
-          missing="$(curl --silent --show-error \
-            --output /dev/null \
-            --write-out '%{http_code}' \
-            --request POST \
-            --max-time 55 \
-            "$TARGET_URL")"
-          wrong="$(curl --silent --show-error \
-            --output /dev/null \
-            --write-out '%{http_code}' \
-            --request POST \
-            --header "Authorization: Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
-            --max-time 55 \
-            "$TARGET_URL")"
-          correct="$(curl --silent --show-error \
-            --output /dev/null \
-            --write-out '%{http_code}' \
-            --request POST \
-            --header "Authorization: Bearer ${SCHEDULER_SECRET}" \
-            --max-time 55 \
-            "$TARGET_URL")"
-          echo "Missing Bearer HTTP status: $missing"
-          echo "Wrong Bearer HTTP status: $wrong"
-          echo "Correct Bearer HTTP status: $correct"
+          missing="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --max-time 55 "$FIXTURE_URL")"
+          wrong="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header "Authorization: Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" --max-time 55 "$FIXTURE_URL")"
+          correct="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$FIXTURE_URL")"
+          echo "Fixture missing Bearer HTTP status: $missing"
+          echo "Fixture wrong Bearer HTTP status: $wrong"
+          echo "Fixture correct Bearer HTTP status: $correct"
           test "$missing" = "401"
           test "$wrong" = "401"
+          test "$correct" = "201"
+
+      - name: Trigger synthetic outbox
+        shell: bash
+        run: |
+          correct="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$TARGET_URL")"
+          echo "Process outbox HTTP status: $correct"
           test "$correct" = "200"
+
+      - name: Record sanitized synthetic status
+        shell: bash
+        run: |
+          body="$(curl --fail-with-body --silent --show-error --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$STATUS_URL")"
+          echo "$body"
+          test "$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin)["fixtures"]["syntheticOnly"])')" = "True"
