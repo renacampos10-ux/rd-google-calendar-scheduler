@@ -2,7 +2,7 @@ name: RD Google Outbox - Homologacao
 
 on:
   schedule:
-    - cron: "3/5 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions: {}
