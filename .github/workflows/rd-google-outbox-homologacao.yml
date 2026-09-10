@@ -1,0 +1,36 @@
+name: RD Google Outbox - Homologacao
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: rd-google-outbox-homologacao
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      TARGET_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox
+      SCHEDULER_SECRET: ${{ secrets.RD_GOOGLE_SCHEDULER_SECRET }}
+    steps:
+      - name: Validate homologation target and secret
+        shell: bash
+        run: |
+          test "$TARGET_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox"
+          test -n "$SCHEDULER_SECRET"
+
+      - name: Trigger homologation outbox processor
+        shell: bash
+        run: |
+          status="$(curl --silent --show-error \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer ${SCHEDULER_SECRET}" \
+            --max-time 55 \
+            "$TARGET_URL")"
+          test "$status" = "200"
