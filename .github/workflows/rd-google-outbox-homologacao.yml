@@ -1,10 +1,6 @@
 name: RD Google Outbox - Homologacao
 
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -14,31 +10,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  cleanup:
+  trigger:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
-      CLEANUP_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/cleanup-outbox-fixtures
-      STATUS_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/outbox-fixture-status
+      TARGET_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox
+      HEALTH_URL: https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/homologation/health
       SCHEDULER_SECRET: ${{ secrets.RD_GOOGLE_SCHEDULER_SECRET }}
     steps:
-      - name: Validate homologation cleanup target
+      - name: Validate homologation target and secret
         shell: bash
         run: |
-          test "$CLEANUP_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/cleanup-outbox-fixtures"
-          test "$STATUS_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/testing/outbox-fixture-status"
+          test "$TARGET_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox"
+          test "$HEALTH_URL" = "https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/homologation/health"
           test -n "$SCHEDULER_SECRET"
 
-      - name: Logically disable synthetic fixtures
+      - name: Validate isolated Google schema
         shell: bash
         run: |
-          body="$(curl --fail-with-body --silent --show-error --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$CLEANUP_URL")"
-          echo "$body"
-          test "$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cleanup"]["logicalCleanup"])')" = "True"
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 55 "$HEALTH_URL")"
+          echo "Health HTTP status: $status"
+          test "$status" = "200"
 
-      - name: Confirm synthetic runtime data disabled
+      - name: Validate Bearer protection and trigger outbox
         shell: bash
         run: |
-          body="$(curl --fail-with-body --silent --show-error --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$STATUS_URL")"
-          echo "$body"
-          printf '%s' "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin)["fixtures"]; assert d["syntheticOnly"] is True; assert all(x["status"] == "DISABLED" for x in d["outbox"]); assert all(x["sync_status"] == "DISABLED" for x in d["links"])'
+          missing="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --max-time 55 "$TARGET_URL")"
+          wrong="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header "Authorization: Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" --max-time 55 "$TARGET_URL")"
+          correct="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$TARGET_URL")"
+          echo "Missing Bearer HTTP status: $missing"
+          echo "Wrong Bearer HTTP status: $wrong"
+          echo "Correct Bearer HTTP status: $correct"
+          test "$missing" = "401"
+          test "$wrong" = "401"
+          test "$correct" = "200"
