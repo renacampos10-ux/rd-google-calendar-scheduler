@@ -35,4 +35,5 @@ jobs:
             --header "Authorization: Bearer ${SCHEDULER_SECRET}" \
             --max-time 55 \
             "$TARGET_URL")"
-          echo "HTTP status: $status"\n          test "$status" = "200"
+          echo "HTTP status: $status"
+          test "$status" = "200"
