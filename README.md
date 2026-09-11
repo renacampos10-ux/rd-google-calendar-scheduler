@@ -1,47 +1,53 @@
-# RD Google Calendar Scheduler — Homologação
+# RD Google Calendar Scheduler
 
-Disparador externo exclusivo para a outbox Google do ambiente isolado da RD.
+Disparador externo da outbox Google da RD com separação rígida entre homologação e produção.
 
 ## Estado
 
-- Repositório dedicado de homologação.
-- Produção não é alvo.
-- Workflow preparado somente para disparo manual controlado.
-- Cron automático ainda não ativado.
-- Google real não é chamado.
+- Homologação: workflow manual existente e isolado.
+- Produção: workflow manual preparado, bloqueado por gate.
+- Cron automático: não configurado.
+- Nenhum workflow de produção foi executado nesta preparação.
 
-## Alvo permitido
+## Homologação
+
+Workflow: `.github/workflows/rd-google-outbox-homologacao.yml`
+
+Alvo fixo:
 
 `POST https://rd-agenda-google-homologacao.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox`
 
-O hostname de produção `orcard-rd-moveis.renacampos10.chatgpt.site` é proibido.
+Secret:
 
-## Gate manual pendente
+`RD_GOOGLE_SCHEDULER_SECRET`
 
-Em **Settings → Secrets and variables → Actions → New repository secret**, criar:
+## Produção — inativa
 
-- Name: `RD_GOOGLE_SCHEDULER_SECRET`
-- Secret: usar exclusivamente o Bearer secret já configurado no Site de homologação.
+Workflow: `.github/workflows/rd-google-outbox-production.yml`
 
-Não colocar o valor em arquivo, commit, issue, URL, body ou log.
+Configuração exclusiva:
 
-Depois da confirmação do secret:
+- variável `RD_GOOGLE_PROD_ENDPOINT`;
+- secret `RD_GOOGLE_PROD_SCHEDULER_SECRET`;
+- gate `RD_GOOGLE_PRODUCTION_SCHEDULER_ENABLED`.
 
-1. executar uma vez por **Run workflow**;
-2. verificar HTTP 200 e logs sem vazamento;
-3. somente então ativar o cron `3/5 * * * *`;
-4. comprovar duas execuções automáticas independentes.
+Valor obrigatório do endpoint:
+
+`https://orcard-rd-moveis.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox`
+
+Enquanto o gate estiver ausente ou diferente de `true`, o job de produção é ignorado. Não adicionar `schedule` antes da autorização separada.
 
 ## Segurança
 
 - `permissions: {}`;
 - nenhum checkout ou action de terceiros;
 - Bearer somente via GitHub Secret;
-- URL fixada no ambiente de homologação;
+- endpoint validado antes de qualquer chamada;
 - resposta descartada;
 - sem `curl -v` ou `set -x`;
-- execução concorrente controlada.
+- concorrência separada por ambiente;
+- nenhum secret em arquivo, commit, issue, URL ou log.
 
-## Rollback
+## Ativação futura
 
-Desabilitar o workflow em **Actions → RD Google Outbox - Homologacao → Disable workflow**. Isso interrompe novos disparos sem alterar a outbox, a Agenda ou a produção.
+A ativação de produção exige, nesta ordem: RC publicada, migration 0027 aplicada e validada, secrets do Site configurados, OAuth oficial concluído, calendário oficial selecionado, sync autorizado e um disparo manual auditado. O cron `*/5 * * * *` continua fora do workflow até autorização específica.
