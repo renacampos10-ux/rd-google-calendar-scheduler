@@ -1,0 +1,33 @@
+name: RD Google Outbox - Production (Inactive)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: rd-google-outbox-production
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    if: ${{ vars.RD_GOOGLE_PRODUCTION_SCHEDULER_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      TARGET_URL: ${{ vars.RD_GOOGLE_PROD_ENDPOINT }}
+      SCHEDULER_SECRET: ${{ secrets.RD_GOOGLE_PROD_SCHEDULER_SECRET }}
+    steps:
+      - name: Validate inactive production gate, target and secret
+        shell: bash
+        run: |
+          test "${{ vars.RD_GOOGLE_PRODUCTION_SCHEDULER_ENABLED }}" = "true"
+          test "$TARGET_URL" = "https://orcard-rd-moveis.renacampos10.chatgpt.site/api/rd/integrations/google/internal/process-outbox"
+          test -n "$SCHEDULER_SECRET"
+
+      - name: Trigger production outbox
+        shell: bash
+        run: |
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header "Authorization: Bearer ${SCHEDULER_SECRET}" --max-time 55 "$TARGET_URL")"
+          echo "Production outbox HTTP status: $status"
+          test "$status" = "200"
