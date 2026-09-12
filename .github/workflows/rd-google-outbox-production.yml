@@ -2,6 +2,8 @@ name: RD Google Outbox - Production (Controlled Activation)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
   push:
     paths:
       - .github/workflows/rd-google-outbox-production.yml
