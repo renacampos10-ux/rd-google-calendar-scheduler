@@ -38,6 +38,7 @@ jobs:
         run: |
           response_file="$(mktemp)"
 
+          set +e
           status="$(curl \
             --silent \
             --show-error \
@@ -48,11 +49,32 @@ jobs:
             --header "Authorization: Bearer ${SCHEDULER_SECRET}" \
             --max-time 55 \
             "$TARGET_URL")"
+          curl_exit_code=$?
+          set -e
 
           echo "Production sync HTTP status: $status"
+          echo "Production sync curl exit code: $curl_exit_code"
+
+          if test "$curl_exit_code" != "0"; then
+            echo "Production sync transport error."
+            exit "$curl_exit_code"
+          fi
 
           if test "$status" = "200"; then
             jq -c '{status, inbound: .execution.inbound, outbound: .execution.outbound}' "$response_file"
+          else
+            echo "Production sync response body (sanitized):"
+
+            head -c 4096 "$response_file" \
+              | sed -E \
+                  -e 's/(access[_-]?token["=: ]+)[^", ]+/\1[REDACTED]/Ig' \
+                  -e 's/(refresh[_-]?token["=: ]+)[^", ]+/\1[REDACTED]/Ig' \
+                  -e 's/(authorization["=: ]+)[^", ]+/\1[REDACTED]/Ig' \
+                  -e 's/(bearer )[A-Za-z0-9._~+\/=-]+/\1[REDACTED]/Ig' \
+                  -e 's/(client[_-]?secret["=: ]+)[^", ]+/\1[REDACTED]/Ig' \
+                  -e 's/(api[_-]?key["=: ]+)[^", ]+/\1[REDACTED]/Ig'
+
+            echo
           fi
 
           test "$status" = "200"
