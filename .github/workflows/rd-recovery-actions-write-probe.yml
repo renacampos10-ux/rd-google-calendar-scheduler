@@ -1,0 +1,39 @@
+name: RD Recovery Actions Write Permission Probe
+
+on:
+  push:
+    branches:
+      - recovery-permission-probe-v1
+    paths:
+      - .github/workflows/rd-recovery-actions-write-probe.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Prove actions write using harmless no-op run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TARGET_RUN_ID: "37387507041"
+        run: |
+          set -euo pipefail
+
+          before="$(gh api "/repos/$REPO/actions/runs/$TARGET_RUN_ID")"
+          before_attempt="$(jq -r '.run_attempt' <<<"$before")"
+          before_name="$(jq -r '.name' <<<"$before")"
+          before_branch="$(jq -r '.head_branch' <<<"$before")"
+
+          test "$before_name" = "RD Recovery Permission Probe Target"
+          test "$before_branch" = "recovery-permission-probe-v1"
+          test "$before_attempt" = "1"
+
+          gh api             --method POST             "/repos/$REPO/actions/runs/$TARGET_RUN_ID/rerun"
+
+          echo "actions_write_probe=PASS"
